@@ -1,0 +1,155 @@
+import os 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+class Layer:
+    def __init__(self, num_inputs, num_nodes):
+        # Initialize layer with given number of inputs and nodes
+        self.num_inputs = num_inputs
+        self.num_nodes = num_nodes
+        self.weights = np.random.randn(num_nodes, num_inputs)  # Randomly initialize weights
+        self.biases = np.random.randn(num_nodes)               # Randomly initialize biases
+        self.outputs = None
+        self.inputs = None
+        self.weight_velocity = np.zeros_like(self.weights)      # Velocity for weights for momentum
+        self.bias_velocity = np.zeros_like(self.biases)          # Velocity for biases for momentum
+
+    def activate(self, x):
+        # Sigmoid activation function
+        return 1 / (1 + np.exp(-x))
+
+    def activate_derivative(self, x):
+        # Derivative of sigmoid function for backpropagation
+        return x * (1 - x)
+
+    def forward(self, inputs):
+        # Forward pass calculation
+        self.inputs = inputs
+        weighted_sum = np.dot(self.weights, inputs) + self.biases
+        self.outputs = self.activate(weighted_sum)
+        return self.outputs
+
+    def backward(self, delta, learning_rate, momentum):
+        # Backpropagation with momentum
+        delta_weights = np.outer(delta, self.inputs)
+        self.weight_velocity = momentum * self.weight_velocity - learning_rate * delta_weights
+        self.bias_velocity = momentum * self.bias_velocity - learning_rate * delta
+
+        # Update weights and biases using momentum
+        self.weights += self.weight_velocity
+        self.biases += self.bias_velocity
+
+
+class MLP:
+    def __init__(self, num_inputs, num_hidden_nodes_1, num_hidden_nodes_2, num_hidden_nodes_3, num_hidden_nodes_4):
+        # Initialize layers for the neural network
+        self.input_layer = Layer(num_inputs, num_hidden_nodes_1)
+        self.hidden_layer1 = Layer(num_hidden_nodes_1, num_hidden_nodes_2)
+        self.hidden_layer2 = Layer(num_hidden_nodes_2, num_hidden_nodes_3)
+        self.hidden_layer3 = Layer(num_hidden_nodes_3, num_hidden_nodes_4)
+        self.output_layer = Layer(num_hidden_nodes_4, 1)
+        self.loss_history = []
+        self.rmse_history = []
+
+    def forward(self, inputs):
+        # Forward propagation through the network
+        hidden_output1 = self.input_layer.forward(inputs)
+        hidden_output2 = self.hidden_layer1.forward(hidden_output1)
+        hidden_output3 = self.hidden_layer2.forward(hidden_output2)
+        hidden_output4 = self.hidden_layer3.forward(hidden_output3)
+        final_output = self.output_layer.forward(hidden_output4)
+        return final_output
+
+    def backward(self, inputs, target, learning_rate, momentum):
+        # Calculate error and backpropagate through the network
+        output_error = self.output_layer.outputs - target
+        output_delta = output_error * self.output_layer.activate_derivative(self.output_layer.outputs)
+
+        # Propagate the error backwards through the hidden layers
+        hidden_delta_4 = np.dot(self.output_layer.weights.T, output_delta) * self.hidden_layer3.activate_derivative(self.hidden_layer3.outputs)
+        hidden_delta_3 = np.dot(self.hidden_layer3.weights.T, hidden_delta_4) * self.hidden_layer2.activate_derivative(self.hidden_layer2.outputs)
+        hidden_delta_2 = np.dot(self.hidden_layer2.weights.T, hidden_delta_3) * self.hidden_layer1.activate_derivative(self.hidden_layer1.outputs)
+        hidden_delta_1 = np.dot(self.hidden_layer1.weights.T, hidden_delta_2) * self.input_layer.activate_derivative(self.input_layer.outputs)
+
+        # Update weights and biases for each layer
+        self.output_layer.backward(output_delta, learning_rate, momentum)
+        self.hidden_layer3.backward(hidden_delta_4, learning_rate, momentum)
+        self.hidden_layer2.backward(hidden_delta_3, learning_rate, momentum)
+        self.hidden_layer1.backward(hidden_delta_2, learning_rate, momentum)
+        self.input_layer.backward(hidden_delta_1, learning_rate, momentum)
+
+        # Calculate loss (Mean Squared Error)
+        loss = 0.5 * np.sum(output_error ** 2)
+        self.loss_history.append(float(loss))
+
+    def train(self, X, y, learning_rate=0.01, momentum=0.9, epochs=1000, annealing_rate=0.99):
+        # Train the neural network over multiple epochs
+        for epoch in range(epochs):
+            epoch_loss = 0
+            epoch_rmse = 0
+
+            # Adjust learning rate using annealing
+            current_learning_rate = learning_rate * (annealing_rate ** epoch)
+
+            for inputs, target in zip(X, y):
+                prediction = self.forward(inputs)
+                self.backward(inputs, target, current_learning_rate, momentum)
+                epoch_loss += self.loss_history[-1]
+                epoch_rmse += (prediction - target) ** 2
+
+            # Calculate RMSE for this epoch
+            rmse = np.sqrt(epoch_rmse / len(X))
+            self.rmse_history.append(rmse)
+
+            # Display training progress every 100 epochs
+            if epoch % 100 == 0 and len(X) > 0:
+                print(f'Epoch {epoch}: Loss = {epoch_loss / len(X)} | RMSE = {rmse} | Learning Rate = {current_learning_rate}')
+
+    def plot_progress(self):
+        # Plot Loss and RMSE over training epochs
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.loss_history, label='Loss', linewidth=1)
+        plt.plot(self.rmse_history, label='RMSE', linewidth=1)
+        plt.title('Loss and RMSE Over Time')
+        plt.xlabel('Epochs')
+        plt.ylabel('Metric Value')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
+# Load and Prepare Dataset
+
+df = pd.read_csv(r'C:\Users\Jevan\OneDrive\Code\AI Coursework\Dataset_without_Date.csv', header=0)
+
+print("✅ First 5 rows of the dataset:")
+print(df.head())
+
+print("\n✅ Data Types of Columns:")
+print(df.dtypes)
+
+df = df.apply(pd.to_numeric, errors='coerce')
+
+print("\n✅ Number of NaN values in each column after conversion:")
+print(df.isna().sum())
+
+df = df.dropna()
+
+print("\n✅ Dataset size after dropping NaN rows:", df.shape)
+
+if df.shape[0] == 0:
+    raise ValueError("❌ Dataset is empty after cleaning. Check your data file.")
+
+X = df.iloc[:, :-1].values  
+y = df.iloc[:, -1].values   
+
+X_normalized = (X - np.mean(X, axis=0)) / np.std(X, axis=0)
+
+if np.isnan(X_normalized).any():
+    raise ValueError("❌ Normalization failed, resulting in NaN values. Check your dataset.")
+
+mlp = MLP(num_inputs=X_normalized.shape[1], num_hidden_nodes_1=10, num_hidden_nodes_2=8, num_hidden_nodes_3=6, num_hidden_nodes_4=4)
+mlp.train(X_normalized, y, learning_rate=0.01, momentum=0.9, epochs=1000, annealing_rate=0.99)
+mlp.plot_progress()
